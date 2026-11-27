@@ -1,4 +1,120 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AI 대시보드 + 스마트 메모</title>
+<style>
+*{box-sizing:border-box;font-family:"Malgun Gothic","Apple SD Gothic Neo",sans-serif}
+body{margin:0;background:#0f172a;color:#e5e7eb}
+.wrap{max-width:1150px;margin:0 auto;padding:28px 20px 70px}
+h1{margin:0 0 6px;font-size:28px}
+.sub{margin:0 0 24px;color:#94a3b8}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:14px}
+.card{background:#1e293b;border:1px solid #334155;border-radius:14px;padding:18px}
+.name{font-size:17px;font-weight:800;margin-bottom:4px}
+.desc{font-size:13px;color:#94a3b8;margin-bottom:12px;min-height:34px}
+a.btn{display:inline-block;padding:8px 13px;border-radius:8px;background:#2563eb;color:#fff;text-decoration:none;font-weight:700;font-size:13px}
+.badge{display:inline-block;margin-left:8px;padding:3px 8px;border-radius:999px;font-size:11px;font-weight:800;background:#164e63;color:#67e8f9}
+.memo{background:#1e293b;border:1px solid #334155;border-radius:14px;padding:18px;margin-top:24px}
+input,textarea,select{width:100%;background:#0f172a;color:#e5e7eb;border:1px solid #334155;border-radius:10px;padding:11px;font-size:14px}
+textarea{min-height:110px;resize:vertical;margin-top:10px}
+.row{display:flex;gap:8px;margin-top:10px;flex-wrap:wrap;align-items:center}
+button{padding:10px 14px;border:0;border-radius:8px;background:#2563eb;color:#fff;font-weight:700;cursor:pointer}
+button.gray{background:#475569}
+button.red{background:#dc2626}
+button.small{padding:6px 10px;font-size:12px}
+.preview{margin-top:12px;display:flex;flex-wrap:wrap;gap:10px}
+.preview img{width:110px;height:110px;object-fit:cover;border-radius:10px;border:1px solid #334155;cursor:pointer}
+.linkchip{background:#0f172a;border:1px solid #334155;border-radius:999px;padding:6px 10px;font-size:12px;max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;cursor:pointer}
+#status{margin-top:10px;font-size:13px;color:#86efac;min-height:18px}
+.notice{background:#7c2d12;border:1px solid #f59e0b;border-radius:14px;padding:16px;margin-bottom:16px}
+.notice h2{margin:0 0 8px;color:#fbbf24;font-size:18px}
+.notice pre{white-space:pre-wrap;margin:0 0 10px;font-family:inherit}
+.notice .thumbs{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px}
+.notice .thumbs img{width:80px;height:80px;object-fit:cover;border-radius:8px}
+.notice a{color:#93c5fd;word-break:break-all}
+.toolbar{display:flex;gap:8px;flex-wrap:wrap;margin:14px 0}
+.toolbar input{max-width:280px}
+.folderbar{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px}
+.folderbar button.active{background:#0ea5e9}
+.item{background:#0f172a;border:1px solid #334155;border-radius:10px;padding:12px;margin-bottom:10px}
+.item.pinned{border-color:#f59e0b;background:#1c1917}
+.item .t{font-size:12px;color:#94a3b8;margin-bottom:6px}
+.item pre{white-space:pre-wrap;margin:0 0 10px;font-family:inherit;color:#e5e7eb}
+.thumbs{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:8px}
+.thumbs img{width:90px;height:90px;object-fit:cover;border-radius:8px;border:1px solid #334155;cursor:pointer}
+.links a{color:#93c5fd;text-decoration:none;font-size:13px;display:block;margin-bottom:4px;word-break:break-all}
+.tag{display:inline-block;background:#334155;color:#cbd5e1;border-radius:999px;padding:3px 8px;font-size:11px;margin-right:6px}
+#imageModal{display:none;position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:99;align-items:center;justify-content:center}
+#imageModal img{max-width:92%;max-height:92%;border-radius:10px}
+</style>
+</head>
+<body>
+<div class="wrap">
+<h1>🤖 AI 대시보드 + 스마트 메모</h1>
+<p class="sub">이미지 복사·붙여넣기, 링크, 고정 공지, 폴더 정리 기능이 있는 메모장입니다. (PC·폰 동기화)</p>
+<div class="memo" id="syncBox" style="margin:0 0 18px"></div>
+
+<div class="grid">
+  <div class="card"><div class="name">Gemini</div><div class="desc">Google AI 챗봇입니다.</div><a class="btn" href="https://gemini.google.com/" target="_blank">Gemini 열기</a><span class="badge">바로가기</span></div>
+  <div class="card"><div class="name">NotebookLM</div><div class="desc">문서 기반 요약·질의응답 도구입니다.</div><a class="btn" href="https://notebooklm.google.com/" target="_blank">NotebookLM 열기</a><span class="badge">바로가기</span></div>
+  <div class="card"><div class="name">Perplexity</div><div class="desc">출처 기반 AI 검색·리서치 도구입니다.</div><a class="btn" href="https://www.perplexity.ai/" target="_blank">Perplexity 열기</a><span class="badge">사용 중</span></div>
+  <div class="card"><div class="name">Microsoft Copilot</div><div class="desc">Microsoft AI 도우미입니다.</div><a class="btn" href="https://copilot.microsoft.com/" target="_blank">Copilot 열기</a><span class="badge">바로가기</span></div>
+  <div class="card"><div class="name">ChatGPT</div><div class="desc">OpenAI 대화형 AI입니다.</div><a class="btn" href="https://chatgpt.com/" target="_blank">ChatGPT 열기</a><span class="badge">바로가기</span></div>
+  <div class="card"><div class="name">Claude</div><div class="desc">Anthropic 대화형 AI입니다.</div><a class="btn" href="https://claude.ai/" target="_blank">Claude 열기</a><span class="badge">바로가기</span></div>
+  <div class="card"><div class="name">Grok</div><div class="desc">xAI 대화형 AI입니다.</div><a class="btn" href="https://grok.com/" target="_blank">Grok 열기</a><span class="badge">바로가기</span></div>
+  <div class="card"><div class="name">네이버 블로그</div><div class="desc">글쓰기와 정보 공유를 위한 블로그 서비스입니다.</div><a class="btn" href="https://section.blog.naver.com/" target="_blank">네이버 블로그 열기</a><span class="badge">바로가기</span></div>
+</div>
+
+<div class="memo">
+  <h2>📝 메모 작성</h2>
+  <div class="row">
+    <input id="memoTitle" placeholder="메모 제목" style="flex:2;min-width:220px">
+    <select id="folderSelect" style="flex:1;min-width:160px"></select>
+  </div>
+  <textarea id="memoText" placeholder="메모 내용을 입력하세요. 이미지는 아래 버튼 또는 Ctrl+V / Cmd+V로 붙여넣을 수 있습니다."></textarea>
+
+  <div class="row">
+    <label style="background:#475569;padding:10px 14px;border-radius:8px;cursor:pointer;font-weight:700">
+      📷 이미지 추가
+      <input id="imageInput" type="file" accept="image/*" multiple hidden onchange="addImages(event)">
+    </label>
+    <input id="linkInput" placeholder="링크 주소 입력 후 Enter" onkeydown="if(event.key==='Enter')addLink()" style="flex:1;min-width:220px">
+    <button class="gray" onclick="addLink()">링크 추가</button>
+  </div>
+
+  <div id="imagePreview" class="preview"></div>
+  <div id="linkPreview" class="preview"></div>
+
+  <div class="row">
+    <button onclick="saveMemo()">메모 저장</button>
+    <button class="gray" onclick="clearDraft()">입력 지우기</button>
+    <button class="red" onclick="deleteAll()">전체 삭제</button>
+  </div>
+  <div id="status"></div>
+</div>
+
+<div id="noticeArea"></div>
+
+<div class="memo">
+  <h2>🗂️ 저장된 메모</h2>
+  <div class="folderbar" id="folderBar"></div>
+  <div class="toolbar">
+    <input id="search" placeholder="제목 또는 내용 검색" oninput="render()">
+    <button class="gray" onclick="addFolder()">＋ 폴더 추가</button>
+    <button class="gray" onclick="renameFolder()">폴더 이름 변경</button>
+    <button class="red" onclick="deleteFolder()">현재 폴더 삭제</button>
+  </div>
+  <div id="memoList"></div>
+</div>
+</div>
+
+<div id="imageModal" onclick="this.style.display='none'"><img id="modalImage"></div>
+
+
 <script>
+window.onerror = function(m, u, l){ var d=document.getElementById("syncBox"); if(d) d.insertAdjacentHTML("beforeend","<div style='color:#fca5a5;margin-top:8px'>오류: "+m+" (줄 "+l+")</div>"); };
 const GF = "dashboard.json";
 let deletedIds = [];
 const gv = k => localStorage.getItem(k) || "";
@@ -39,7 +155,6 @@ function mergeData(remote) {
   memos = [...map.values()].filter(m => !dead.has(m.id)).sort((a, b) => b.id - a.id);
   deletedIds = [...dead];
   const fs = new Set(folders);
-  (remote.folders || []).forEach(f => { if (!folders.length) fs.add(f); });
   memos.forEach(m => { if (m.folder && !fs.has(m.folder)) fs.add(m.folder); });
   folders = [...fs];
 }
@@ -58,12 +173,12 @@ async function apiLoad() {
     folders = d.folders && d.folders.length ? d.folders : folders;
     deletedIds = d.deleted || [];
     syncMsg("동기화 완료 (" + memos.length + "개)");
-  } catch (e) { syncMsg("불러오기 실패: " + e.message, false); }
+  } catch (e) { memos = []; syncMsg("불러오기 실패: " + e.message, false); }
 }
 
 let saving = Promise.resolve();
 function apiSave() {
-  if (!gv("gh_tok") || !gv("gh_gid")) return;
+  if (!gv("gh_tok") || !gv("gh_gid")) { showStatus("먼저 위에서 GitHub 토큰으로 연결하세요.", false); return; }
   saving = saving.then(async () => {
     try {
       syncMsg("저장 중...");
