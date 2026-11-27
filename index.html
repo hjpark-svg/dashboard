@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AI 대시보드</title>
+<style>
+body{font-family:sans-serif;margin:0;padding:16px;background:#f5f6f7}
+h1{font-size:20px;margin:0 0 12px}
+textarea{width:100%;height:120px;padding:10px;font-size:15px;box-sizing:border-box}
+button{padding:10px 16px;font-size:15px;margin-top:8px}
+ul{padding-left:18px}
+li{margin-bottom:8px}
+</style>
+</head>
+<body>
+<h1>AI 대시보드</h1>
+<textarea id="memo" placeholder="메모를 입력하세요"></textarea>
+<button onclick="save()">저장</button>
+<button onclick="clearAll()">전체 삭제</button>
+<h2>저장된 메모</h2>
+<ul id="list"></ul>
+<script>
+function load(){return JSON.parse(localStorage.getItem('memos')||'[]')}
+function render(){document.getElementById('list').innerHTML=load().map(m=>'<li>'+m.replace(/</g,'&lt;')+'</li>').join('')}
+function save(){const v=document.getElementById('memo').value.trim();if(!v)return;const a=load();a.push(v);localStorage.setItem('memos',JSON.stringify(a));document.getElementById('memo').value='';render()}
+function clearAll(){if(confirm('전체 삭제할까요?')){localStorage.removeItem('memos');render()}}
+render()
+</script>
+</body>
+</html>
