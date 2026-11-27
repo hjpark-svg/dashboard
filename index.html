@@ -1,109 +1,410 @@
-<!DOCTYPE html>
-<html lang="ko"><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>AI 대시보드</title>
-<style>
-body{font-family:sans-serif;padding:16px;background:#f5f6f7;max-width:720px;margin:auto}
-h1{font-size:20px}
-textarea,input{width:100%;padding:10px;font-size:15px;box-sizing:border-box;margin-top:6px}
-textarea{height:100px}
-button{padding:10px 14px;font-size:15px;margin:8px 6px 0 0}
-.card{background:#fff;border-radius:8px;padding:12px;margin-top:10px;white-space:pre-wrap;word-break:break-all}
-.time{color:#888;font-size:12px}
-#status{margin-top:8px;font-size:13px;color:#555}
-.box{background:#fff;border-radius:8px;padding:12px;margin-bottom:12px}
-.hide{display:none}
-</style></head><body>
-<h1>AI 대시보드</h1>
-
-<div id="setup" class="box hide">
-<b>처음 1번만: 토큰 붙여넣기</b>
-<input id="tok" type="password" placeholder="github_pat_로 시작하는 토큰">
-<button onclick="setup()">연결하기</button>
-</div>
-
-<div id="main" class="hide">
-<textarea id="memo" placeholder="메모를 입력하세요"></textarea>
-<button onclick="add()">저장</button>
-<button onclick="pull()">새로고침</button>
-<button onclick="phoneLink()">휴대폰 연결 링크 복사</button>
-<button onclick="reset()">연결 해제</button>
-</div>
-<div id="status"></div>
-<div id="list"></div>
-
 <script>
-const F='memos.json';
-let memos=[];
-const $=id=>document.getElementById(id);
-const get=k=>localStorage.getItem(k)||'';
-function st(s){$('status').textContent=s}
+const GF = "dashboard.json";
+let deletedIds = [];
+const gv = k => localStorage.getItem(k) || "";
 
 (function(){
-  const h=new URLSearchParams(location.hash.slice(1));
-  if(h.get('t')&&h.get('g')){
-    localStorage.setItem('tok',h.get('t'));localStorage.setItem('gid',h.get('g'));
-    history.replaceState(null,'',location.pathname+location.search);
+  const h = new URLSearchParams(location.hash.slice(1));
+  if (h.get("t") && h.get("g")) {
+    localStorage.setItem("gh_tok", h.get("t"));
+    localStorage.setItem("gh_gid", h.get("g"));
+    history.replaceState(null, "", location.pathname + location.search);
   }
 })();
 
-async function gh(path,method,body){
-  const r=await fetch('https://api.github.com'+path,{method,headers:{'Authorization':'Bearer '+get('tok'),'Accept':'application/vnd.github+json'},body:body?JSON.stringify(body):undefined});
-  if(!r.ok)throw new Error('HTTP '+r.status);
+async function gh(path, method, body) {
+  const r = await fetch("https://api.github.com" + path, {
+    method: method,
+    headers: { "Authorization": "Bearer " + gv("gh_tok"), "Accept": "application/vnd.github+json" },
+    body: body ? JSON.stringify(body) : undefined
+  });
+  if (!r.ok) throw new Error("HTTP " + r.status);
   return r.json();
 }
-async function setup(){
-  const t=$('tok').value.trim();if(!t)return;
-  localStorage.setItem('tok',t);
-  try{
-    st('연결 중...');
-    const j=await gh('/gists','POST',{description:'AI dashboard memos',public:false,files:{[F]:{content:'[]'}}});
-    localStorage.setItem('gid',j.id);
-    start();
-  }catch(e){localStorage.removeItem('tok');st('연결 실패: '+e.message+' (토큰의 Gists 권한을 확인하세요)')}
+
+async function fetchRemote() {
+  const j = await gh("/gists/" + gv("gh_gid"), "GET");
+  const f = j.files[GF];
+  if (!f) return { memos: [], folders: null, deleted: [] };
+  let text = f.content;
+  if (f.truncated) text = await (await fetch(f.raw_url)).text();
+  return text ? JSON.parse(text) : { memos: [], folders: null, deleted: [] };
 }
-function render(){
-  $('list').innerHTML='';
-  memos.slice().reverse().forEach(m=>{
-    const d=document.createElement('div');d.className='card';
-    const t=document.createElement('div');t.className='time';t.textContent=new Date(m.t).toLocaleString('ko-KR');
-    const b=document.createElement('div');b.textContent=m.text;
-    const x=document.createElement('button');x.textContent='삭제';x.onclick=()=>del(m.id);
-    d.append(t,b,x);$('list').append(d);
+
+function mergeData(remote) {
+  const dead = new Set([...(remote.deleted || []), ...deletedIds]);
+  const map = new Map();
+  (remote.memos || []).forEach(m => map.set(m.id, m));
+  memos.forEach(m => map.set(m.id, m));
+  memos = [...map.values()].filter(m => !dead.has(m.id)).sort((a, b) => b.id - a.id);
+  deletedIds = [...dead];
+  const fs = new Set(folders);
+  (remote.folders || []).forEach(f => { if (!folders.length) fs.add(f); });
+  memos.forEach(m => { if (m.folder && !fs.has(m.folder)) fs.add(m.folder); });
+  folders = [...fs];
+}
+
+function syncMsg(t, ok) {
+  const b = document.getElementById("syncStatus");
+  if (b) { b.textContent = t; b.style.color = ok === false ? "#fca5a5" : "#86efac"; }
+}
+
+async function apiLoad() {
+  if (!gv("gh_tok") || !gv("gh_gid")) { memos = []; return; }
+  try {
+    syncMsg("불러오는 중...");
+    const d = await fetchRemote();
+    memos = d.memos || [];
+    folders = d.folders && d.folders.length ? d.folders : folders;
+    deletedIds = d.deleted || [];
+    syncMsg("동기화 완료 (" + memos.length + "개)");
+  } catch (e) { syncMsg("불러오기 실패: " + e.message, false); }
+}
+
+let saving = Promise.resolve();
+function apiSave() {
+  if (!gv("gh_tok") || !gv("gh_gid")) return;
+  saving = saving.then(async () => {
+    try {
+      syncMsg("저장 중...");
+      const remote = await fetchRemote();
+      mergeData(remote);
+      await gh("/gists/" + gv("gh_gid"), "PATCH", { files: { [GF]: { content: JSON.stringify({ memos, folders, deleted: deletedIds.slice(-500) }) } } });
+      syncMsg("저장 완료 (" + memos.length + "개)");
+      render();
+    } catch (e) { syncMsg("저장 실패: " + e.message, false); }
   });
 }
-async function pull(){
-  try{
-    st('불러오는 중...');
-    const j=await gh('/gists/'+get('gid'),'GET');
-    const f=j.files[F];
-    memos=f&&f.content?JSON.parse(f.content):[];
-    render();st('동기화 완료 ('+memos.length+'개)');
-  }catch(e){st('불러오기 실패: '+e.message)}
+
+async function connectToken() {
+  const t = document.getElementById("tokInput").value.trim();
+  if (!t) return;
+  localStorage.setItem("gh_tok", t);
+  try {
+    syncMsg("연결 중...");
+    const j = await gh("/gists", "POST", { description: "AI dashboard data", public: false, files: { [GF]: { content: JSON.stringify({ memos: [], folders: folders, deleted: [] }) } } });
+    localStorage.setItem("gh_gid", j.id);
+    location.reload();
+  } catch (e) {
+    localStorage.removeItem("gh_tok");
+    syncMsg("연결 실패: " + e.message + " (토큰의 Gists 권한을 확인하세요)", false);
+  }
 }
-async function push(){
-  try{st('저장 중...');await gh('/gists/'+get('gid'),'PATCH',{files:{[F]:{content:JSON.stringify(memos)}}});st('저장 완료')}
-  catch(e){st('저장 실패: '+e.message)}
+
+function phoneLink() {
+  const u = location.origin + location.pathname + "#t=" + encodeURIComponent(gv("gh_tok")) + "&g=" + encodeURIComponent(gv("gh_gid"));
+  const done = () => syncMsg("복사됨. 폰으로 보내 여세요. 이 링크는 남에게 공유 금지");
+  if (navigator.clipboard) navigator.clipboard.writeText(u).then(done).catch(() => prompt("이 링크를 복사하세요", u));
+  else prompt("이 링크를 복사하세요", u);
 }
-async function add(){
-  const v=$('memo').value.trim();if(!v)return;
-  await pull();
-  memos.push({id:Date.now(),t:new Date().toISOString(),text:v});
-  $('memo').value='';render();await push();
+
+function disconnect() {
+  if (!confirm("이 기기의 연결을 해제할까요? (메모는 Gist에 남아 있습니다)")) return;
+  localStorage.removeItem("gh_tok"); localStorage.removeItem("gh_gid"); location.reload();
 }
-async function del(id){
-  if(!confirm('삭제할까요?'))return;
-  await pull();
-  memos=memos.filter(m=>m.id!==id);render();await push();
+
+async function refreshNow() { await apiLoad(); render(); }
+
+function shrink(dataUrl, cb) {
+  const img = new Image();
+  img.onload = () => {
+    const max = 900, k = Math.min(1, max / Math.max(img.width, img.height));
+    const c = document.createElement("canvas");
+    c.width = Math.round(img.width * k); c.height = Math.round(img.height * k);
+    c.getContext("2d").drawImage(img, 0, 0, c.width, c.height);
+    cb(c.toDataURL("image/jpeg", 0.7));
+  };
+  img.onerror = () => cb(dataUrl);
+  img.src = dataUrl;
 }
-function phoneLink(){
-  const u=location.origin+location.pathname+'#t='+encodeURIComponent(get('tok'))+'&g='+encodeURIComponent(get('gid'));
-  (navigator.clipboard?navigator.clipboard.writeText(u):Promise.reject()).then(()=>st('복사됨. 휴대폰으로 보내서 여세요 (이 링크는 남에게 공유 금지)')).catch(()=>prompt('이 링크를 복사하세요',u));
+
+function initSyncBar() {
+  const connected = gv("gh_tok") && gv("gh_gid");
+  document.getElementById("syncBox").innerHTML = connected
+    ? `<button class="small gray" onclick="refreshNow()">🔄 새로고침</button>
+       <button class="small gray" onclick="phoneLink()">📱 폰 연결 링크 복사</button>
+       <button class="small red" onclick="disconnect()">연결 해제</button>
+       <span id="syncStatus" style="font-size:13px"></span>`
+    : `<b>처음 1번만: GitHub 토큰 붙여넣기</b>
+       <div class="row"><input id="tokInput" type="password" placeholder="github_pat_ 로 시작하는 토큰" style="flex:1;min-width:220px">
+       <button onclick="connectToken()">연결하기</button></div>
+       <div id="syncStatus" style="font-size:13px;margin-top:6px"></div>`;
 }
-function reset(){if(confirm('이 기기의 연결을 해제할까요?')){localStorage.removeItem('tok');localStorage.removeItem('gid');location.reload()}}
-function start(){
-  if(get('tok')&&get('gid')){$('setup').classList.add('hide');$('main').classList.remove('hide');pull()}
-  else{$('setup').classList.remove('hide');$('main').classList.add('hide')}
+document.addEventListener("visibilitychange", () => { if (!document.hidden && gv("gh_tok")) refreshNow(); });
+</script>
+
+<script>
+const MEMO_KEY = "smart_memos_v3";
+const FOLDER_KEY = "smart_folders_v3";
+let memos = [];
+let folders = ["전체", "공부", "여행", "아이디어"];
+let currentFolder = "전체";
+let draftImages = [];
+let draftLinks = [];
+
+function saveAll() {
+  apiSave();
 }
-start();
-</script></body></html>
+
+function showStatus(text, ok) {
+  const box = document.getElementById("status");
+  box.textContent = text;
+  box.style.color = ok ? "#86efac" : "#fca5a5";
+}
+
+function addImages(event) {
+  [...event.target.files].forEach(file => {
+    const reader = new FileReader();
+    reader.onload = e => {
+      shrink(e.target.result, s => { draftImages.push(s); renderDraft(); });
+      renderDraft();
+    };
+    reader.readAsDataURL(file);
+  });
+  event.target.value = "";
+}
+
+document.addEventListener("paste", event => {
+  const items = [...(event.clipboardData?.items || [])];
+  items.forEach(item => {
+    if (item.type.startsWith("image/")) {
+      const file = item.getAsFile();
+      const reader = new FileReader();
+      reader.onload = e => {
+        shrink(e.target.result, s => { draftImages.push(s); renderDraft(); });
+        renderDraft();
+        showStatus("이미지가 붙여넣기 되었습니다.", true);
+      };
+      reader.readAsDataURL(file);
+    }
+  });
+});
+
+function addLink() {
+  const input = document.getElementById("linkInput");
+  let url = input.value.trim();
+  if (!url) return;
+  if (!/^https?:\/\//i.test(url)) url = "https://" + url;
+  draftLinks.push(url);
+  input.value = "";
+  renderDraft();
+}
+
+function removeDraftImage(i) { draftImages.splice(i,1); renderDraft(); }
+function removeDraftLink(i) { draftLinks.splice(i,1); renderDraft(); }
+
+function renderDraft() {
+  document.getElementById("imagePreview").innerHTML =
+    draftImages.map((src,i)=>`<img src="${src}" title="클릭하면 삭제" onclick="removeDraftImage(${i})">`).join("");
+  document.getElementById("linkPreview").innerHTML =
+    draftLinks.map((url,i)=>`<span class="linkchip" title="클릭하면 삭제" onclick="removeDraftLink(${i})">🔗 ${escapeHtml(url)}</span>`).join("");
+}
+
+function saveMemo() {
+  const title = document.getElementById("memoTitle").value.trim();
+  const text = document.getElementById("memoText").value.trim();
+  const folder = document.getElementById("folderSelect").value;
+
+  if (!title && !text && !draftImages.length && !draftLinks.length) {
+    showStatus("저장할 내용을 입력하거나 이미지·링크를 추가하세요.", false);
+    return;
+  }
+
+  memos.unshift({
+    id: Date.now(),
+    title: title || "제목 없는 메모",
+    text,
+    folder,
+    images: draftImages,
+    links: draftLinks,
+    pinned: false,
+    time: new Date().toLocaleString("ko-KR")
+  });
+
+  saveAll();
+  clearDraft();
+  showStatus("메모가 저장되었습니다.", true);
+  render();
+}
+
+function clearDraft() {
+  document.getElementById("memoTitle").value = "";
+  document.getElementById("memoText").value = "";
+  document.getElementById("linkInput").value = "";
+  draftImages = [];
+  draftLinks = [];
+  renderDraft();
+}
+
+function togglePin(id) {
+  const memo = memos.find(m => m.id === id);
+  memo.pinned = !memo.pinned;
+  saveAll();
+  render();
+}
+
+function deleteMemo(id) {
+  if (!confirm("이 메모를 삭제하시겠습니까?")) return;
+  deletedIds.push(id);
+  memos = memos.filter(m => m.id !== id);
+  saveAll();
+  render();
+}
+
+function deleteAll() {
+  if (!confirm("모든 메모를 삭제하시겠습니까?")) return;
+  deletedIds.push(...memos.map(m=>m.id));
+  memos = [];
+  saveAll();
+  render();
+}
+
+function addFolder() {
+  const name = prompt("새 폴더 이름을 입력하세요:");
+  if (!name || !name.trim()) return;
+  const folder = name.trim();
+  if (!folders.includes(folder)) folders.push(folder);
+  currentFolder = folder;
+  saveAll();
+  render();
+}
+
+function renameFolder() {
+  if (currentFolder === "전체") {
+    showStatus("기본 폴더는 이름을 변경할 수 없습니다.", false);
+    return;
+  }
+  const name = prompt("새 폴더 이름:", currentFolder);
+  if (!name || !name.trim()) return;
+  const newName = name.trim();
+  memos.forEach(m => { if (m.folder === currentFolder) m.folder = newName; });
+  folders = folders.map(f => f === currentFolder ? newName : f);
+  currentFolder = newName;
+  saveAll();
+  render();
+}
+
+function deleteFolder() {
+  if (currentFolder === "전체") {
+    showStatus("기본 폴더는 삭제할 수 없습니다.", false);
+    return;
+  }
+  if (!confirm(`'${currentFolder}' 폴더를 삭제할까요? 폴더 안 메모는 '전체'로 이동합니다.`)) return;
+  memos.forEach(m => { if (m.folder === currentFolder) m.folder = "전체"; });
+  folders = folders.filter(f => f !== currentFolder);
+  currentFolder = "전체";
+  saveAll();
+  render();
+}
+
+function setFolder(folder) {
+  currentFolder = folder;
+  render();
+}
+
+function openImage(src) {
+  document.getElementById("modalImage").src = src;
+  document.getElementById("imageModal").style.display = "flex";
+}
+
+function renderFolders() {
+  const bar = document.getElementById("folderBar");
+  const select = document.getElementById("folderSelect");
+  bar.innerHTML = "";
+  select.innerHTML = "";
+
+  folders.forEach(folder => {
+    const count = folder === "전체" ? memos.length : memos.filter(m => m.folder === folder).length;
+    const button = document.createElement("button");
+    button.className = folder === currentFolder ? "active" : "gray";
+    button.textContent = `${folder} (${count})`;
+    button.onclick = () => setFolder(folder);
+    bar.appendChild(button);
+
+    const option = document.createElement("option");
+    option.value = folder;
+    option.textContent = folder;
+    if (folder === currentFolder) option.selected = true;
+    select.appendChild(option);
+  });
+}
+
+function renderNotices() {
+  const area = document.getElementById("noticeArea");
+  const notices = memos.filter(m => m.pinned && (currentFolder === "전체" || m.folder === currentFolder));
+  area.innerHTML = "";
+
+  if (!notices.length) return;
+
+  const box = document.createElement("div");
+  box.className = "notice";
+  box.innerHTML = `<h2>📌 고정된 공지사항</h2>`;
+
+  notices.forEach(memo => {
+    const images = memo.images.length ? `<div class="thumbs">${memo.images.map(src=>`<img src="${src}" onclick="openImage('${src}')">`).join("")}</div>` : "";
+    const links = memo.links.length ? memo.links.map(url=>`<a href="${url}" target="_blank">🔗 ${escapeHtml(url)}</a>`).join("") : "";
+    box.innerHTML += `
+      <div class="item pinned">
+        <div class="t">${memo.time} · ${memo.folder}</div>
+        <h3 style="margin:0 0 8px">${escapeHtml(memo.title)}</h3>
+        ${memo.text ? `<pre>${escapeHtml(memo.text)}</pre>` : ""}
+        ${images}
+        <div class="links">${links}</div>
+        <div class="row"><button class="small gray" onclick="togglePin(${memo.id})">고정 해제</button></div>
+      </div>
+    `;
+  });
+
+  area.appendChild(box);
+}
+
+function render() {
+  renderFolders();
+  renderNotices();
+
+  const keyword = document.getElementById("search").value.trim().toLowerCase();
+  const list = document.getElementById("memoList");
+  list.innerHTML = "";
+
+  let filtered = memos.filter(m =>
+    (currentFolder === "전체" || m.folder === currentFolder) &&
+    (m.title.toLowerCase().includes(keyword) || m.text.toLowerCase().includes(keyword))
+  );
+
+  filtered.sort((a,b) => (b.pinned - a.pinned) || (b.id - a.id));
+
+  if (!filtered.length) {
+    list.innerHTML = "<p style='color:#94a3b8'>이 폴더에는 메모가 없습니다.</p>";
+    return;
+  }
+
+  filtered.forEach(memo => {
+    const images = memo.images.length ? `<div class="thumbs">${memo.images.map(src=>`<img src="${src}" onclick="openImage('${src}')">`).join("")}</div>` : "";
+    const links = memo.links.length ? `<div class="links">${memo.links.map(url=>`<a href="${url}" target="_blank">🔗 ${escapeHtml(url)}</a>`).join("")}</div>` : "";
+
+    const div = document.createElement("div");
+    div.className = "item" + (memo.pinned ? " pinned" : "");
+    div.innerHTML = `
+      <div class="t">${memo.time} · ${memo.folder}</div>
+      <h3 style="margin:0 0 8px">${escapeHtml(memo.title)}</h3>
+      ${memo.text ? `<pre>${escapeHtml(memo.text)}</pre>` : ""}
+      ${images}
+      ${links}
+      <div class="row">
+        <button class="small ${memo.pinned ? "gray" : ""}" onclick="togglePin(${memo.id})">${memo.pinned ? "📌 고정 해제" : "📌 공지로 고정"}</button>
+        <button class="small red" onclick="deleteMemo(${memo.id})">삭제</button>
+      </div>
+    `;
+    list.appendChild(div);
+  });
+}
+
+function escapeHtml(text) {
+  return text.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+}
+
+initSyncBar();
+apiLoad().then(()=>render());
+</script>
+</body>
+</html>
